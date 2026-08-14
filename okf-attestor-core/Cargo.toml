@@ -1,0 +1,25 @@
+[package]
+name = "okf-attestor-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Offline, deterministic attestation verification for OKF Attested Computations"
+readme = "README.md"
+keywords = ["okf", "attestation", "wasm", "verification"]
+categories = ["wasm", "development-tools"]
+exclude = ["tests/**"]
+
+[dependencies]
+okf.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+wasmtime.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23.0"
+wat = "1.240.0"

@@ -1,0 +1,23 @@
+[workspace]
+members = ["okf-attestor-core", "okf-attestor-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+authors = ["Faizan Shurjeel"]
+license = "Apache-2.0"
+repository = "https://github.com/Faizan-Shurjeel/okf-attestor"
+homepage = "https://github.com/Faizan-Shurjeel/okf-attestor"
+
+[workspace.dependencies]
+okf = "0.2.1"
+serde = { version = "1.0.228", features = ["derive"] }
+sha2 = "0.10.9"
+thiserror = "2.0.16"
+wasmtime = { version = "47.0.3", default-features = false, features = ["cranelift", "runtime", "std"] }
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
