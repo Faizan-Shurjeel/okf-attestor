@@ -1,39 +1,70 @@
 # OKF Attestor
 
-Offline, fail-closed reproduction of [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) Attested Computations.
+Offline, fail-closed verification of [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) Attested Computations.
 
-`okf-attestor` is a Rust library and CLI. It discovers every concept whose exact type is `Attested Computation`, executes only an explicitly supported deterministic WebAssembly profile, and emits one of three verdicts:
+`okf-attestor` is a Rust library and CLI that discovers concepts whose exact type is `Attested Computation`, executes only an explicitly supported deterministic WebAssembly profile, and emits one of three verdicts:
 
-- **Reproduced** — deterministic execution completed and output matched exactly.
-- **Diverged** — deterministic execution completed, but output differed.
-- **Unattestable** — the runtime, contract, artifact, ABI, or execution could not satisfy the deterministic profile.
+- **Reproduced** — execution completed under the supported profile and the output matched exactly.
+- **Diverged** — execution completed under the supported profile, but the output differed.
+- **Unattestable** — the runtime, contract, artifact, ABI, or execution could not satisfy the supported profile.
 
 The verifier never fetches remote content and gives guest WebAssembly no network, filesystem, clock, randomness, environment, arguments, or host stdio capabilities.
 
 > [!IMPORTANT]
-> `Reproduced` means “internally reproducible from these exact bundle artifacts.” It does not prove who authorized or signed those artifacts. An editor able to replace the module and expected output together can create a newly reproducible bundle. Cryptographic identity and bundle notarization are intentionally separate concerns.
+> `Reproduced` means “internally reproducible from these exact bundle artifacts.” It does **not** prove who authorized or signed those artifacts. An editor able to replace the module and expected output together can create a newly reproducible bundle. Cryptographic identity and bundle notarization are intentionally separate concerns.
 
 ## Status
 
-This repository implements an initial `0.1.0` profile and is not yet published. The package layout is already publication-ready:
+`okf-attestor` is published on crates.io as `0.1.0`.
+
+The workspace contains two crates:
 
 - `okf-attestor-core` — reusable verification library.
 - `okf-attestor` — installable CLI package.
 
-## Try it
+The `0.1.0` release implements the initial `okf:wasm@1` extension profile described below.
+
+## Install
+
+Install the CLI from crates.io:
+
+```console
+cargo install okf-attestor
+```
+
+Or add the library to a Rust project:
+
+```toml
+[dependencies]
+okf-attestor-core = "0.1"
+```
+
+## Quick start
+
+Verify a bundle from the repository fixtures:
 
 ```console
 cargo run -p okf-attestor -- verify fixtures
-cargo run -p okf-attestor -- verify fixtures --concept reproduced
-cargo run -p okf-attestor -- verify fixtures --format json
 ```
 
 The full fixture bundle intentionally exits `1` because it contains a Diverged concept.
 
-Once published:
+Verify one concept:
 
 ```console
-cargo install okf-attestor
+cargo run -p okf-attestor -- verify fixtures --concept reproduced
+```
+
+Emit a machine-readable JSON report:
+
+```console
+cargo run -p okf-attestor -- verify fixtures --format json
+```
+
+After installation:
+
+```console
+okf-attestor verify path/to/bundle
 okf-attestor verify path/to/bundle --format json
 ```
 
@@ -59,7 +90,7 @@ JSON reports use `schema_version: 1`, one result per concept, stable snake-case 
 ## Library
 
 ```rust,no_run
-use okf_attestor_core::{Verdict, verify_bundle};
+use okf_attestor_core::{verify_bundle, Verdict};
 
 let report = verify_bundle("path/to/bundle")?;
 for result in report.results {
@@ -72,13 +103,15 @@ for result in report.results {
 # Ok::<(), okf_attestor_core::AttestorError>(())
 ```
 
-Use `Verifier` when checking more than one bundle so its configured Wasmtime engine can be reused.
+For repeated verification, use `Verifier` so its configured Wasmtime engine can be reused.
 
 ## Why an extension profile is necessary
 
-Canonical OKF v0.2 defines `runtime`, parameter declarations, executor instructions, receipt **field names**, and an attester resource. It does not define persisted invocation values, a receipt wire format, expected output, or a portable executor/attester ABI. Generic BigQuery, dbt, Python, and similar concepts therefore cannot be safely re-executed offline from a bundle alone and are reported as Unattestable.
+Canonical OKF v0.2 defines the `Attested Computation` contract, including runtime, parameters, executor instructions, receipt field names, and an attester resource. It does not define persisted invocation values, a receipt wire format, an expected-output artifact, or a portable executor/attester ABI.
 
-OKF permits producer extension keys. This project defines the following narrow profile.
+That means generic BigQuery, dbt, Python, and similar computations cannot safely be re-executed offline from a bundle alone. This project therefore does **not** pretend to provide a universal OKF executor. Unsupported runtimes are reported as `Unattestable`.
+
+OKF permits producer extension keys. `okf-attestor` defines a deliberately narrow `okf:wasm@1` profile that supplies the missing portable execution contract.
 
 ## `okf:wasm@1` profile
 
@@ -97,7 +130,9 @@ okf_attestor:
 ---
 ```
 
-Profile rules:
+The `okf_attestor` key is a producer-defined extension namespace for this profile; it is distinct from canonical OKF's `attester` resource.
+
+### Profile rules
 
 1. `runtime` must exactly equal `okf:wasm@1`.
 2. `computation`, `input`, and `expected_output` are regular files resolved relative to the concept document.
@@ -116,16 +151,18 @@ okf_attestor_alloc(input_len: i32) -> i32
 okf_attestor_compute(input_ptr: i32, input_len: i32) -> i64
 ```
 
-The host calls `okf_attestor_alloc`, writes input bytes to the returned memory address, then calls `okf_attestor_compute`. The returned `i64` packs the output region as:
+The host calls `okf_attestor_alloc`, writes the input bytes to the returned memory address, then calls `okf_attestor_compute`. The returned `i64` packs the output region as:
 
 ```text
 bits 63..32: unsigned output pointer
 bits 31..0:  unsigned output length
 ```
 
-A trap, invalid region, forbidden import, invalid ABI, or deterministic resource-limit exhaustion is Unattestable—not Diverged.
+A trap, invalid region, forbidden import, invalid ABI, or resource-limit exhaustion is **Unattestable**, not Diverged.
 
-Current fixed limits:
+### Fixed limits
+
+These limits are part of the `okf:wasm@1` behavior:
 
 - Wasm module: 4 MiB.
 - Input, expected output, and actual output: 64 KiB each.
@@ -135,13 +172,30 @@ Current fixed limits:
 - SIMD, relaxed SIMD, memory64, multi-memory, tail calls, custom page sizes, and wide arithmetic disabled.
 - NaN canonicalization enabled.
 
-These values are part of the `okf:wasm@1` behavior and should not be loosened without a profile/version change and cross-platform fixtures.
+These values should not be loosened without a profile/version change and corresponding cross-platform fixtures.
+
+## Verdict semantics
+
+The three verdicts intentionally distinguish successful divergence from inability to establish a valid reproduction:
+
+```text
+Reproduced
+  valid execution + exact output match
+
+Diverged
+  valid execution + output differs
+
+Unattestable
+  the supported execution contract could not be satisfied
+```
+
+Examples of `Unattestable` conditions include unsupported runtimes, invalid bundle contracts, unsafe artifact paths, forbidden imports, invalid ABI, traps, and deterministic resource-limit exhaustion.
 
 ## Security model
 
 The strongest isolation property is structural: imported functions and memories are rejected before instantiation, and an empty linker is used. Core WebAssembly has no syscall instruction, so an import-free module has no route to host network, files, time, entropy, environment, or processes.
 
-Fuel and store limits bound guest execution and runtime memory growth. Wasmtime validation/compilation still occurs in-process, so v0.1 does not claim strong denial-of-service isolation against arbitrarily hostile internet-sourced binaries. A future hardened mode may compile and execute in a resource-limited worker process.
+Fuel and store limits bound guest execution and runtime memory growth. Wasmtime validation and compilation still occur in-process, so `0.1.0` does **not** claim strong denial-of-service isolation against arbitrarily hostile binaries. A future hardened mode may compile and execute in a resource-limited worker process.
 
 Malformed bundle frontmatter is a tool-level error rather than being silently skipped. Unsupported runtimes are always Unattestable and are never executed.
 
@@ -156,21 +210,29 @@ cargo test --workspace
 cargo run -p okf-attestor -- verify fixtures --format json
 ```
 
-Before the first publication, validate the core package and inspect the CLI archive plan:
+## Project layout
 
-```console
-cargo package -p okf-attestor-core
-cargo publish --dry-run -p okf-attestor-core
-cargo package -p okf-attestor --list
+```text
+okf-attestor/
+├── okf-attestor-core/   # reusable verification library
+├── okf-attestor-cli/    # CLI package
+├── fixtures/             # example OKF bundles and test concepts
+├── .github/workflows/    # CI
+├── PRD.md                # project requirements and scope
+└── SECURITY.md           # vulnerability reporting and security policy
 ```
 
-Publish `okf-attestor-core` first and wait for its `0.1.0` index entry. Cargo cannot fully package or dry-run the CLI before that registry dependency exists. Then run:
+## Scope and limitations
 
-```console
-cargo package -p okf-attestor
-cargo publish --dry-run -p okf-attestor
-cargo publish -p okf-attestor
-```
+`okf-attestor` is intentionally narrow. It verifies the supported `okf:wasm@1` profile offline; it is not a general-purpose executor for every OKF runtime.
+
+In particular:
+
+- No remote content is fetched during verification.
+- Unsupported runtimes are not executed.
+- Cryptographic signatures, artifact authorization, and bundle notarization are outside the reproduction verdict.
+- In-process Wasmtime execution is not presented as a complete hostile-binary DoS boundary.
+- `Reproduced` establishes reproduction from the exact supplied artifacts, not provenance or authorization.
 
 ## License
 
